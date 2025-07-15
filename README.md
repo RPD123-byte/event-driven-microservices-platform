@@ -194,7 +194,7 @@ Key components:
 - **Jenkins** for CI/CD pipelines
 - **SonarQube** for code quality analysis
 - **Nexus** as artifact repository
-- **Prometheus/Grafana** for monitoring and alerting
+- **Grafana** for monitoring and alerting
 
 ## Architecture
 
@@ -212,7 +212,7 @@ Key components:
              │Applications  │            │Applications │
              └──────┬───────┘            └──────┬──────┘
                     ▼                           ▼
-      Jenkins, SonarQube, Nexus           Monitoring (Prometheus/Grafana)
+      Jenkins, SonarQube, Nexus           Monitoring (Grafana)
 ```
 
 ## Prerequisites
