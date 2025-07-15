@@ -1,0 +1,83 @@
+goal: Automatically detect and remediate Jenkins build queue backup when jobs are
+  stuck due to resource constraints in the EDMP platform
+steps:
+- name: Check Jenkins build queue status
+  type: cli
+  command: curl -s http://jenkins:8080/queue/api/json | jq '.items | length'
+- name: Get detailed queue information
+  type: cli
+  command: 'curl -s http://jenkins:8080/queue/api/json | jq ''.items[] | {id: .id,
+    task: .task.name, why: .why, inQueueSince: .inQueueSince}'''
+- name: Check Jenkins executor status
+  type: cli
+  command: curl -s http://jenkins:8080/computer/api/json | jq '.busyExecutors, .totalExecutors'
+- name: Monitor Jenkins container resource usage
+  type: cli
+  command: "docker stats jenkins --no-stream --format 'table {{.Container}}\t{{.CPUPerc}}\t\
+    {{.MemUsage}}'"
+- name: Check for stuck builds
+  type: cli
+  command: 'curl -s http://jenkins:8080/computer/api/json | jq ''.computer[].executors[]
+    | select(.currentExecutable != null) | {number: .number, progress: .progress,
+    stuck: .likely_stuck}'''
+- name: Analyze SonarQube queue for backlog
+  type: cli
+  command: curl -s http://sonarqube:9000/api/ce/activity?status=PENDING | jq '.queue
+    | length'
+- name: Check Nexus repository health
+  type: cli
+  command: curl -s -o /dev/null -w '%{http_code}' http://nexus:8081/service/rest/v1/status
+- name: Determine remediation strategy
+  type: prompt
+  prompt: 'Based on the Jenkins queue data, executor status, and resource usage: 1)
+    If executors are all busy and memory > 80%, increase Jenkins container memory
+    2) If builds are stuck, identify and abort them 3) If SonarQube backlog is causing
+    delays, prioritize critical builds 4) If all resources are constrained, scale
+    horizontally'
+- name: Abort stuck builds if identified
+  type: cli
+  command: for job in $(curl -s http://jenkins:8080/computer/api/json | jq -r '.computer[].executors[]
+    | select(.likely_stuck == true) | .currentExecutable.url'); do curl -X POST "${job}stop";
+    done
+- name: Increase Jenkins container resources if needed
+  type: cli
+  command: docker update --memory=2g --memory-swap=2g --cpus=2 jenkins
+- name: Clear Jenkins workspace for stuck jobs
+  type: cli
+  command: docker exec jenkins find /var/jenkins_home/workspace -name '*.lock' -mtime
+    +1 -delete
+- name: Restart Jenkins safely if required
+  type: cli
+  command: curl -X POST http://jenkins:8080/safeRestart
+- name: Monitor queue reduction
+  type: cli
+  command: 'for i in {1..10}; do echo "Queue size: $(curl -s http://jenkins:8080/queue/api/json
+    | jq ''.items | length'')"; sleep 30; done'
+- name: Check Spring Boot Admin for microservice health
+  type: cli
+  command: 'curl -s http://spring-boot-admin:8090/applications | jq ''.[] | {name:
+    .name, status: .statusInfo.status, health: .statusInfo.details}'''
+- name: Verify Kafka is not causing downstream delays
+  type: cli
+  command: docker exec kafka kafka-run-class.sh kafka.tools.ConsumerOffsetChecker
+    --zookeeper localhost:2181 --group jenkins-events-consumer
+- name: Update Grafana dashboard annotations
+  type: integration
+  integration: grafana
+  method: create_annotation
+  parameters:
+    dashboardId: jenkins-monitoring
+    time: now
+    tags:
+    - jenkins
+    - queue-backup
+    - auto-remediation
+    text: Jenkins queue backup detected and remediated. Queue size reduced from ${initial_queue_size}
+      to ${current_queue_size}
+- name: Create incident report if issue persists
+  type: prompt
+  prompt: 'If Jenkins queue remains above 10 after remediation, create a detailed
+    incident report including: 1) Initial queue size and stuck build details 2) Resource
+    constraints identified 3) Remediation actions taken 4) Current queue status 5)
+    Recommendations for permanent fixes (more executors, resource allocation, build
+    optimization)'
