@@ -1,0 +1,79 @@
+goal: Automatically detect and recover from Kafka broker failure in the EDMP platform
+  to ensure event streaming continuity
+steps:
+- name: Check Kafka container health
+  type: cli
+  command: "docker ps --filter name=kafka --format 'table {{.Names}}\t{{.Status}}\t\
+    {{.RunningFor}}'"
+- name: Verify Kafka process inside container
+  type: cli
+  command: docker exec kafka ps aux | grep -E 'kafka\.Kafka|java.*kafka' | grep -v
+    grep || echo 'Kafka process not found'
+- name: Check Zookeeper connectivity
+  type: cli
+  command: docker exec kafka bash -c 'echo ruok | nc zookeeper 2181' || echo 'Zookeeper
+    connection failed'
+- name: Analyze Kafka logs for errors
+  type: cli
+  command: docker logs kafka --tail 50 | grep -E 'ERROR|FATAL|Exception|Failed' ||
+    echo 'No errors in recent logs'
+- name: Check disk space on host
+  type: cli
+  command: df -h | grep -E '^/dev/' | awk '$5+0 > 80 {print $0}'
+- name: Verify Docker network connectivity
+  type: cli
+  command: 'docker network inspect prodnetwork | jq ''.[0].Containers | to_entries[]
+    | {name: .value.Name, ip: .value.IPv4Address}'''
+- name: Test Kafka port accessibility
+  type: cli
+  command: nc -zv kafka 9092 && echo 'Kafka port 9092 is accessible' || echo 'Kafka
+    port 9092 is not accessible'
+- name: Determine recovery strategy
+  type: prompt
+  prompt: 'Based on the health checks: 1) If container is stopped, restart it 2) If
+    Kafka process crashed inside container, restart container 3) If Zookeeper connection
+    lost, check and restart Zookeeper first 4) If disk space issue, clean up logs
+    5) If network issue, recreate network connections'
+- name: Restart Kafka container if needed
+  type: cli
+  command: docker restart kafka && sleep 10
+- name: Verify Kafka started successfully
+  type: cli
+  command: timeout 30 bash -c 'until docker exec kafka kafka-broker-api-versions.sh
+    --bootstrap-server localhost:9092 2>/dev/null; do echo "Waiting for Kafka to start...";
+    sleep 2; done'
+- name: Check Kafka broker ID registration
+  type: cli
+  command: docker exec kafka kafka-broker-api-versions.sh --bootstrap-server localhost:9092
+    | head -5
+- name: List Kafka topics to verify functionality
+  type: cli
+  command: docker exec kafka kafka-topics.sh --list --bootstrap-server localhost:9092
+- name: Create test topic if none exist
+  type: cli
+  command: docker exec kafka kafka-topics.sh --create --topic edmp-health-check --bootstrap-server
+    localhost:9092 --partitions 1 --replication-factor 1 --if-not-exists
+- name: Test message production
+  type: cli
+  command: echo 'test-message-$(date +%s)' | docker exec -i kafka kafka-console-producer.sh
+    --broker-list localhost:9092 --topic edmp-health-check
+- name: Test message consumption
+  type: cli
+  command: timeout 5 docker exec kafka kafka-console-consumer.sh --bootstrap-server
+    localhost:9092 --topic edmp-health-check --from-beginning --max-messages 1
+- name: Update Kafka Manager cluster status
+  type: cli
+  command: curl -s http://localhost:9001/ | grep -q 'Kafka Manager' && echo 'Kafka
+    Manager is accessible' || echo 'Kafka Manager not responding'
+- name: Create recovery report
+  type: prompt
+  prompt: 'Generate a recovery report including: 1) Initial failure detection time
+    and symptoms 2) Root cause identified (container crash, process failure, network
+    issue, etc.) 3) Recovery actions taken 4) Current Kafka status and topic list
+    5) Recommendations to prevent future occurrences'
+- name: Notify dependent services
+  type: prompt
+  prompt: 'Since Kafka is the central event bus for EDMP, document which services
+    may need to be restarted or checked: Jenkins (if using Kafka for build events),
+    microservices (once deployed), and any event consumers. Note that in the current
+    fresh deployment, no microservices are running yet.'
