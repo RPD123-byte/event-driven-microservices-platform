@@ -1,0 +1,187 @@
+{
+  "goal": "Deploy and configure the EDMP infrastructure on AWS including VPC, EC2 instance, and verify all components are properly initialized with Jenkins, Nexus, SonarQube, and Kafka services running",
+  "domain": "functional_provisioning_deployment",
+  "level": "level_2",
+  "complexity": "complex",
+  "steps": [
+    {
+      "name": "Review existing Terraform configuration",
+      "type": "prompt",
+      "prompt": "Examine the Terraform configuration in the terraform/ directory to understand the infrastructure requirements including VPC settings, EC2 instance specifications, security groups, and the user-data initialization script. Document key parameters like instance type, AMI ID, and security group rules.",
+      "parameters": {},
+      "files": ["terraform/main.tf", "terraform/variables.tf", "terraform/user-data-complete.sh"]
+    },
+    {
+      "name": "Initialize Terraform",
+      "type": "cli",
+      "command": "terraform init",
+      "parameters": {
+        "working_directory": "./terraform"
+      },
+      "files": []
+    },
+    {
+      "name": "Validate Terraform configuration",
+      "type": "cli",
+      "command": "terraform validate",
+      "parameters": {
+        "working_directory": "./terraform"
+      },
+      "files": []
+    },
+    {
+      "name": "Plan infrastructure deployment",
+      "type": "cli",
+      "command": "terraform plan -out=tfplan",
+      "parameters": {
+        "working_directory": "./terraform"
+      },
+      "files": []
+    },
+    {
+      "name": "Apply Terraform configuration",
+      "type": "cli",
+      "command": "terraform apply -auto-approve tfplan",
+      "parameters": {
+        "working_directory": "./terraform"
+      },
+      "files": []
+    },
+    {
+      "name": "Get instance details from Terraform output",
+      "type": "cli",
+      "command": "terraform output -json",
+      "parameters": {
+        "working_directory": "./terraform"
+      },
+      "files": []
+    },
+    {
+      "name": "Verify EC2 instance is running",
+      "type": "integration",
+      "integration": "aws",
+      "method": "ec2.DescribeInstances",
+      "parameters": {
+        "InstanceIds": ["${instance_id}"],
+        "Region": "${region}"
+      },
+      "files": []
+    },
+    {
+      "name": "Wait for instance initialization",
+      "type": "prompt",
+      "prompt": "Monitor the EC2 instance status and wait for the user-data script to complete initialization. This typically takes 10-15 minutes. Check the instance's system log for completion indicators.",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Verify security groups configuration",
+      "type": "integration",
+      "integration": "aws",
+      "method": "ec2.DescribeSecurityGroups",
+      "parameters": {
+        "GroupIds": ["${security_group_id}"],
+        "Region": "${region}"
+      },
+      "files": []
+    },
+    {
+      "name": "Test SSH connectivity",
+      "type": "cli",
+      "command": "ssh -o StrictHostKeyChecking=no -i ${key_path} ec2-user@${public_ip} 'echo SSH connection successful'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Verify Docker is installed and running",
+      "type": "cli",
+      "command": "ssh -i ${key_path} ec2-user@${public_ip} 'docker --version && docker ps'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Check Docker Compose installation",
+      "type": "cli",
+      "command": "ssh -i ${key_path} ec2-user@${public_ip} 'docker-compose --version'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Verify all EDMP services are running",
+      "type": "cli",
+      "command": "ssh -i ${key_path} ec2-user@${public_ip} 'cd /home/ec2-user/edmp && docker-compose ps'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Test Jenkins accessibility",
+      "type": "cli",
+      "command": "curl -I http://${public_ip}:8080",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Test Nexus accessibility",
+      "type": "cli",
+      "command": "curl -I http://${public_ip}:8081",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Test SonarQube accessibility",
+      "type": "cli",
+      "command": "curl -I http://${public_ip}:9000",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Verify Kafka is running",
+      "type": "cli",
+      "command": "ssh -i ${key_path} ec2-user@${public_ip} 'docker exec edmp_kafka_1 kafka-topics.sh --list --bootstrap-server localhost:9092'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Test Spring Boot Admin monitoring",
+      "type": "cli",
+      "command": "curl -I http://${public_ip}:8090",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Check Kafka Manager accessibility",
+      "type": "cli",
+      "command": "curl -I http://${public_ip}:9001",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Verify Jenkins seed job configuration",
+      "type": "prompt",
+      "prompt": "Check that the Jenkins seed job is properly configured by accessing Jenkins at http://${public_ip}:8080 and verifying the 'edmp-seed-job' exists and is ready to generate pipelines from the microservices configuration.",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Validate network connectivity between services",
+      "type": "cli",
+      "command": "ssh -i ${key_path} ec2-user@${public_ip} 'docker exec edmp_jenkins_1 ping -c 3 nexus && docker exec edmp_jenkins_1 ping -c 3 sonarqube'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Check system resources",
+      "type": "cli",
+      "command": "ssh -i ${key_path} ec2-user@${public_ip} 'df -h && free -m && docker stats --no-stream'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Create verification report",
+      "type": "prompt",
+      "prompt": "Generate a comprehensive deployment verification report documenting: 1) All services running status, 2) Accessible endpoints with their URLs, 3) Resource utilization, 4) Any initialization errors or warnings found in logs, 5) Recommendations for next steps in configuring the EDMP platform.",
+      "parameters": {},
+      "files": []
+    }
+  ]
+}

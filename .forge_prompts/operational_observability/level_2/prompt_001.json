@@ -1,0 +1,171 @@
+{
+  "goal": "Automatically detect and remediate Kafka consumer lag in the EDMP platform when microservices fall behind in processing events",
+  "domain": "operational_observability",
+  "level": "level_2",
+  "complexity": "complex",
+  "trigger": "Kafka JMX metric kafka.consumer.lag > 5000 messages for any consumer group on edmp-events topic for > 3 minutes",
+  "steps": [
+    {
+      "name": "Connect to Kafka JMX metrics endpoint",
+      "type": "integration",
+      "integration": "prometheus",
+      "method": "query",
+      "parameters": {
+        "query": "kafka_consumer_lag_sum{topic=\"edmp-events\"} > 5000",
+        "time": "now"
+      },
+      "files": []
+    },
+    {
+      "name": "Identify affected consumer groups and partitions",
+      "type": "cli",
+      "command": "kubectl exec -n edmp deployment/kafka -- kafka-consumer-groups.sh --bootstrap-server kafka:9092 --describe --all-groups | grep 'LAG' | awk '$5 > 5000 {print $1, $2, $3, $5}'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Check consumer pod health status",
+      "type": "cli",
+      "command": "kubectl get pods -n edmp -l app=microservice-consumer -o json | jq '.items[] | select(.status.phase != \"Running\") | {name: .metadata.name, status: .status.phase, reason: .status.reason}'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Analyze consumer memory usage",
+      "type": "integration",
+      "integration": "kubernetes",
+      "method": "read_namespaced_pod_metrics",
+      "parameters": {
+        "namespace": "edmp",
+        "label_selector": "app=microservice-consumer"
+      },
+      "files": []
+    },
+    {
+      "name": "Check for OutOfMemory errors in consumer logs",
+      "type": "cli",
+      "command": "kubectl logs -n edmp -l app=microservice-consumer --tail=100 | grep -E 'OutOfMemoryError|heap space|GC overhead'",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Determine remediation strategy",
+      "type": "prompt",
+      "prompt": "Based on the consumer lag data, pod health status, and memory usage patterns, determine the appropriate remediation: 1) If memory issues detected, increase memory limits 2) If pods are crashed, restart them 3) If lag is increasing rapidly, scale up consumer replicas 4) If specific partition is stuck, trigger consumer group rebalance",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Scale up consumer deployment if needed",
+      "type": "cli",
+      "command": "kubectl scale deployment -n edmp microservice-consumer --replicas=3",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Update consumer memory limits if OOM detected",
+      "type": "integration",
+      "integration": "kubernetes",
+      "method": "patch_namespaced_deployment",
+      "parameters": {
+        "name": "microservice-consumer",
+        "namespace": "edmp",
+        "body": {
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [{
+                  "name": "consumer",
+                  "resources": {
+                    "limits": {
+                      "memory": "1Gi"
+                    },
+                    "requests": {
+                      "memory": "512Mi"
+                    }
+                  }
+                }]
+              }
+            }
+          }
+        }
+      },
+      "files": []
+    },
+    {
+      "name": "Trigger consumer group rebalance",
+      "type": "cli",
+      "command": "kubectl delete pod -n edmp -l app=microservice-consumer --grace-period=30",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Wait for pods to stabilize",
+      "type": "cli",
+      "command": "kubectl wait --for=condition=Ready pod -n edmp -l app=microservice-consumer --timeout=120s",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Monitor lag reduction progress",
+      "type": "cli",
+      "command": "for i in {1..10}; do kubectl exec -n edmp deployment/kafka -- kafka-consumer-groups.sh --bootstrap-server kafka:9092 --describe --group edmp-consumer-group | grep 'edmp-events'; sleep 30; done",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Verify lag is decreasing",
+      "type": "integration",
+      "integration": "prometheus",
+      "method": "query_range",
+      "parameters": {
+        "query": "kafka_consumer_lag_sum{topic=\"edmp-events\"}",
+        "start": "5m",
+        "end": "now",
+        "step": "30s"
+      },
+      "files": []
+    },
+    {
+      "name": "Check Spring Boot Admin for service health",
+      "type": "cli",
+      "command": "kubectl port-forward -n edmp service/spring-boot-admin 8080:8080 & sleep 5 && curl -s http://localhost:8080/applications | jq '.[] | select(.name == \"microservice-consumer\") | {name: .name, status: .statusInfo.status}' && pkill -f port-forward",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Scale back if lag is under control",
+      "type": "prompt",
+      "prompt": "If consumer lag has dropped below 1000 messages and is stable, determine if we should scale the consumer deployment back to original replica count to save resources. Check current resource usage and lag trends.",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Create incident report if lag persists",
+      "type": "prompt",
+      "prompt": "If consumer lag remains above 5000 after remediation attempts, create an incident report detailing: 1) Initial lag detection time and affected partitions 2) Remediation actions taken 3) Current lag status 4) Recommended manual intervention steps 5) Root cause hypothesis based on logs and metrics",
+      "parameters": {},
+      "files": []
+    },
+    {
+      "name": "Update monitoring alerts",
+      "type": "integration",
+      "integration": "prometheus",
+      "method": "create_alert_rule",
+      "parameters": {
+        "name": "high_kafka_consumer_lag_edmp",
+        "expr": "kafka_consumer_lag_sum{topic=\"edmp-events\"} > 5000",
+        "for": "3m",
+        "labels": {
+          "severity": "warning",
+          "service": "edmp-platform"
+        },
+        "annotations": {
+          "summary": "High Kafka consumer lag detected",
+          "description": "Consumer lag for topic edmp-events is {{ $value }} messages"
+        }
+      },
+      "files": []
+    }
+  ]
+}
