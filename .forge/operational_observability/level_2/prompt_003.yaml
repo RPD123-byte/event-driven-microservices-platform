@@ -1,0 +1,58 @@
+goal: Monitor and auto-restart unhealthy Docker containers in the EDMP platform to
+  maintain service availability
+steps:
+- name: List all EDMP containers with their status
+  type: cli
+  command: "docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.State}}' | grep\
+    \ -E 'edmp|kafka|jenkins|nexus|sonar|grafana|registry'"
+- name: Identify stopped or unhealthy containers
+  type: cli
+  command: docker ps -a --format '{{.Names}}:{{.State}}' | grep -v ':running' | grep
+    -E 'edmp|kafka|jenkins|nexus|sonar|grafana|registry'
+- name: Get the exact Kafka container name
+  type: cli
+  command: docker ps -a --format '{{.Names}}' | grep kafka | head -1
+- name: Check Docker Compose project status
+  type: cli
+  command: cd /home/ec2-user/edmp-platform && docker-compose -f docker-compose-dev.yml
+    ps
+- name: Analyze container logs for failure reasons
+  type: prompt
+  prompt: For each stopped container identified, check the last 20 lines of logs to
+    understand why it failed. Look for OutOfMemory errors, port conflicts, missing
+    dependencies, or configuration issues.
+- name: Check system resources
+  type: cli
+  command: "echo '=== Memory Usage ===' && free -h && echo -e '\\n=== Disk Usage ==='\
+    \ && df -h | grep -E '^/dev/' && echo -e '\\n=== Docker Stats ===' && docker stats\
+    \ --no-stream --format 'table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}'"
+- name: Restart stopped containers using Docker Compose
+  type: cli
+  command: cd /home/ec2-user/edmp-platform && docker-compose -f docker-compose-dev.yml
+    up -d
+- name: Wait for containers to stabilize
+  type: cli
+  command: sleep 30
+- name: Verify all services are running
+  type: cli
+  command: cd /home/ec2-user/edmp-platform && docker-compose -f docker-compose-dev.yml
+    ps | grep -c 'Up' && echo ' services are running'
+- name: Test service connectivity
+  type: cli
+  command: echo 'Jenkins:' && curl -s -o /dev/null -w '%{http_code}' http://localhost:8080
+    && echo -e '\nNexus:' && curl -s -o /dev/null -w '%{http_code}' http://localhost:8081
+    && echo -e '\nSonarQube:' && curl -s -o /dev/null -w '%{http_code}' http://localhost:9000
+    && echo -e '\nKafka Manager:' && curl -s -o /dev/null -w '%{http_code}' http://localhost:9001
+    && echo -e '\nGrafana:' && curl -s -o /dev/null -w '%{http_code}' http://localhost:10001
+- name: Verify Kafka functionality with discovered container name
+  type: cli
+  command: 'KAFKA_CONTAINER=$(docker ps --format ''{{.Names}}'' | grep kafka | grep
+    -v manager | head -1) && echo "Testing Kafka in container: $KAFKA_CONTAINER" &&
+    docker exec $KAFKA_CONTAINER /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server
+    localhost:9092 | head -3'
+- name: Create health check report
+  type: prompt
+  prompt: 'Generate a health check report including: 1) Which containers were found
+    stopped/unhealthy 2) Root cause of failures from log analysis 3) System resource
+    status at time of recovery 4) Services successfully restarted 5) Any services
+    still failing after restart attempt'
