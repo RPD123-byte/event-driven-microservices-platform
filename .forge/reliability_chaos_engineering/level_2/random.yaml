@@ -1,0 +1,29 @@
+goal: Execute a series of tasks including terraform modifications, AWS operations,
+  and file management
+steps:
+- name: Step 1
+  type: prompt
+  prompt: Modify the terraform code to use the region us-west-1 instead of us-east-1
+- name: New Step
+  type: prompt
+  prompt: use the ask for information tool to ask the human about why they wanted
+    to change the region to us west 1
+- name: New Step 1
+  type: integration
+  integration: aws
+  method: iam.GetAccountSummary
+- name: New Step 2
+  type: prompt
+  prompt: 'retrieve the relevant methods for aws to get ec2 intances . '
+- name: New Step 3
+  type: prompt
+  prompt: create a file that says hello world.
+- name: New Step 4
+  type: prompt
+  prompt: delete the file u just created that says hello world
+- name: New Step 5
+  type: prompt
+  prompt: query the codebase for information on terraform
+- name: New Step 6
+  type: prompt
+  prompt: compress TR-2
